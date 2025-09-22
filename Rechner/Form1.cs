@@ -104,8 +104,40 @@ namespace Rechner
                     awaitingPostEquals = false;
                     UpdateTextBox();
                     return;
-                default:
-                    break;
+                case "√":
+                    // Wurzel-Speziallogik
+                    if (awaitingPostEquals && !string.IsNullOrEmpty(lastResult))
+                    {
+                        currentTask = "√" + lastResult;
+                        awaitingPostEquals = false;
+                        UpdateTextBox();
+                        return;
+                    }
+                    if (string.IsNullOrEmpty(currentTask))
+                    {
+                        currentTask = "√"; // Benutzer kann Zahl anschließen: √9
+                        UpdateTextBox();
+                        return;
+                    }
+                    else
+                    {
+                        // letzte Zahl mit √ prefixen oder, wenn keine, einfach √ anhängen
+                        char[] ops = new[] { '+', '-', '*', '/', '×', '÷' };
+                        int lastOp = currentTask.LastIndexOfAny(ops);
+                        int numStart = lastOp >= 0 ? lastOp + 1 : 0;
+                        string beforeNum = currentTask.Substring(0, numStart);
+                        string num = currentTask.Substring(numStart);
+                        if (num.Length == 0)
+                        {
+                            currentTask += "√";
+                        }
+                        else
+                        {
+                            currentTask = beforeNum + "√" + num;
+                        }
+                        UpdateTextBox();
+                        return;
+                    }
             }
 
             // Verhalten direkt nach '=': Anzeige bleibt bis zur nächsten Taste stehen
@@ -242,7 +274,7 @@ namespace Rechner
             string normalized = NormalizeExpression(expression);
             try
             {
-                // xʸ vorrechnen (als '^' markiert)
+                // xʸ/√ vorrechnen
                 normalized = EvaluatePowers(normalized);
 
                 var result = new System.Data.DataTable().Compute(normalized, null);
@@ -392,6 +424,52 @@ namespace Rechner
             return expr.Replace("negate(", "-(");
         }
 
+        // √(...) in (^0.5) umschreiben; auch √<zahl> unterstützen
+        private static string ExpandSqrt(string expr)
+        {
+            if (string.IsNullOrEmpty(expr)) return expr;
+            var sb = new StringBuilder(expr);
+            int i = 0;
+            while (i < sb.Length)
+            {
+                if (sb[i] != '√') { i++; continue; }
+                int start = i;
+                int argStart = i + 1;
+                if (argStart >= sb.Length) { sb.Remove(start, 1); continue; }
+
+                int argEnd = -1;
+                if (sb[argStart] == '(')
+                {
+                    // Klammerargument
+                    int depth = 0; int k = argStart;
+                    while (k < sb.Length)
+                    {
+                        if (sb[k] == '(') depth++;
+                        else if (sb[k] == ')') { depth--; if (depth == 0) break; }
+                        k++;
+                    }
+                    if (k >= sb.Length) { i++; continue; }
+                    argEnd = k;
+                }
+                else
+                {
+                    // Zahl (optional führendes '-') parsen
+                    int k = argStart;
+                    if (k < sb.Length && sb[k] == '-') k++;
+                    while (k < sb.Length && (char.IsDigit(sb[k]) || sb[k] == '.')) k++;
+                    if (k == argStart) { i++; continue; }
+                    argEnd = k - 1;
+                }
+
+                string inner = sb.ToString(argStart, argEnd - argStart + 1);
+                string repl = "(" + inner + ")^(0.5)";
+                sb.Remove(start, argEnd - start + 1);
+                sb.Insert(start, repl);
+                i = start + repl.Length;
+            }
+            return sb.ToString();
+        }
+
         // Zentrale Normalisierung: mehrere Symbole für DataTable-Compute anpassen
         private static string NormalizeExpression(string expression)
         {
@@ -411,6 +489,8 @@ namespace Rechner
             expression = ExpandPercent(expression);
             // negate(...) zu unärem Minus umschreiben
             expression = ExpandNegate(expression);
+            // Wurzel expandieren
+            expression = ExpandSqrt(expression);
 
             // xʸ in '^' markieren
             expression = expression.Replace("xʸ", "^");
@@ -418,7 +498,7 @@ namespace Rechner
             return expression;
         }
 
-        // '^'-Operatoren (aus xʸ) auswerten, rechtsassoziativ
+        // '^'-Operatoren (aus xʸ/√) auswerten, rechtsassoziativ
         private static string EvaluatePowers(string expr)
         {
             if (string.IsNullOrEmpty(expr)) return expr;
