@@ -8,6 +8,8 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.IO;
 
 namespace Rechner
 {
@@ -21,10 +23,36 @@ namespace Rechner
         private string lastResult = string.Empty;
         // Nach '=' auf nächste Eingabe warten
         private bool awaitingPostEquals = false;
+        // Zufallszahlgenerator für random(...)
+        private static readonly Random rng = new Random();
+        // Pfad der Historie-Datei
+        private readonly string historyFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "historie.txt");
+        // Zentrale Operatorliste
+        private static readonly char[] Operators = new[] { '+', '-', '*', '/', '×', '÷' };
+
+        // Win32 für Fensterziehen ohne Rahmen
+        private const int WM_NCLBUTTONDOWN = 0xA1;
+        private const int HTCAPTION = 0x2;
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
 
         public Form1()
         {
             InitializeComponent();
+            // Textfelder gegen direkte Eingabe sperren
+            if (textBox1 != null)
+            {
+                textBox1.ReadOnly = true;
+                textBox1.ShortcutsEnabled = false;
+            }
+            if (richTextBox1 != null)
+            {
+                richTextBox1.ReadOnly = true;
+                richTextBox1.ShortcutsEnabled = false;
+            }
+
             // Keyboard: KeyPreview und Handler aktivieren
             this.KeyPreview = true;
             this.KeyDown += Form1_KeyDown;
@@ -54,7 +82,21 @@ namespace Rechner
             button22.Click += Button_Click; // CE
             button19.Click += Button_Click; // √
             button20.Click += Button_Click; // xʸ
+            button26.Click += Button_Click; // x!
             button13.Click += ButtonEquals_Click; // =
+            // Neu: Klammern und RND
+            button24.Click += Button_Click; // (
+            button25.Click += Button_Click; // )
+            button27.Click += Button_Click; // RND
+        }
+
+        private void panelTitle_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ReleaseCapture();
+                SendMessage(this.Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            }
         }
 
         private static bool IsOperator(string t)
@@ -122,8 +164,7 @@ namespace Rechner
                     else
                     {
                         // letzte Zahl mit √ prefixen oder, wenn keine, einfach √ anhängen
-                        char[] ops = new[] { '+', '-', '*', '/', '×', '÷' };
-                        int lastOp = currentTask.LastIndexOfAny(ops);
+                        int lastOp = currentTask.LastIndexOfAny(Operators);
                         int numStart = lastOp >= 0 ? lastOp + 1 : 0;
                         string beforeNum = currentTask.Substring(0, numStart);
                         string num = currentTask.Substring(numStart);
@@ -138,6 +179,54 @@ namespace Rechner
                         UpdateTextBox();
                         return;
                     }
+                case "RND":
+                    // Random: letzte Zahl in random(zahl) umwandeln
+                    if (awaitingPostEquals && !string.IsNullOrEmpty(lastResult))
+                    {
+                        currentTask = $"random({lastResult})";
+                        awaitingPostEquals = false;
+                        UpdateTextBox();
+                        return;
+                    }
+                    {
+                        int lastOp2 = currentTask.LastIndexOfAny(Operators);
+                        int numStart2 = lastOp2 >= 0 ? lastOp2 + 1 : 0;
+                        string before2 = currentTask.Substring(0, numStart2);
+                        string num2 = currentTask.Substring(numStart2);
+                        if (num2.Length > 0)
+                        {
+                            currentTask = before2 + "random(" + num2 + ")";
+                        }
+                        else
+                        {
+                            // Falls keine Zahl vorhanden: Funktion starten
+                            currentTask += "random(";
+                        }
+                        UpdateTextBox();
+                        return;
+                    }
+                case "x!":
+                    // Fakultät (postfix). Nach Ergebnis direkt anwenden
+                    if (awaitingPostEquals && !string.IsNullOrEmpty(lastResult))
+                    {
+                        currentTask = lastResult + "!";
+                        awaitingPostEquals = false;
+                        UpdateTextBox();
+                        return;
+                    }
+                    if (!string.IsNullOrEmpty(currentTask))
+                    {
+                        char last = currentTask[currentTask.Length - 1];
+                        if (char.IsDigit(last) || last == ')' || last == '%')
+                        {
+                            // Nur anhängen, wenn der letzte Token eine Zahl/Klammer/% ist
+                            currentTask += "!";
+                            UpdateTextBox();
+                            return;
+                        }
+                    }
+                    // sonst ignorieren
+                    return;
             }
 
             // Verhalten direkt nach '=': Anzeige bleibt bis zur nächsten Taste stehen
@@ -155,7 +244,7 @@ namespace Rechner
                 }
                 else
                 {
-                    // Sonstiges Zeichen (z. B. %) fällt unter Operatoren oben, falls nicht erfasst: anhängen
+                    // Sonstiges Zeichen (z. B. %, (, )) → neue Eingabe starten
                     currentTask = t;
                 }
                 awaitingPostEquals = false;
@@ -187,6 +276,10 @@ namespace Rechner
                     case ',': token = ","; break;
                     case '.': token = ","; break;
                     case '%': token = "%"; break;
+                    case '(':
+                        token = "("; break;
+                    case ')':
+                        token = ")"; break;
                     case '=':
                         ButtonEquals_Click(this, EventArgs.Empty);
                         e.Handled = true; return;
@@ -201,6 +294,11 @@ namespace Rechner
             if (token != null)
             {
                 ProcessToken(token);
+                e.Handled = true;
+            }
+            else
+            {
+                // Alles andere sperren (Buchstaben, Sonderzeichen, Leerzeichen)
                 e.Handled = true;
             }
         }
@@ -276,26 +374,60 @@ namespace Rechner
             {
                 // xʸ/√ vorrechnen
                 normalized = EvaluatePowers(normalized);
+                // Fakultät (!) auswerten
+                normalized = ExpandFactorial(normalized);
+                // random(...) in konkrete Zahl umwandeln
+                normalized = ExpandRandom(normalized);
 
-                var result = new System.Data.DataTable().Compute(normalized, null);
-                lastResult = result.ToString();
+                var resultObj = new System.Data.DataTable().Compute(normalized, null);
+                string resultStr = Convert.ToString(resultObj, CultureInfo.InvariantCulture);
 
-                // In die Historie übernehmen: Aufgabe = Ergebnis + Zeilenumbruch für die nächste Aufgabe
+                // Infinity/NaN prüfen (z. B. bei Division durch 0)
+                double parsed;
+                if (double.TryParse(resultStr, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                {
+                    if (double.IsInfinity(parsed))
+                    {
+                        throw new DivideByZeroException();
+                    }
+                }
+
+                lastResult = resultStr;
+
+                // In die Historie übertragen: Aufgabe = Ergebnis + Zeilenumbruch für die nächste Aufgabe
                 history += expression + "=\n" + lastResult + "\n \n";
+                
+                // Persistieren in Datei
+                try { File.WriteAllText(historyFilePath, history, Encoding.UTF8); } catch { /* Ignorieren */ }
 
                 // Aktuelle Aufgabe NICHT sofort löschen – bis zur nächsten Taste sichtbar lassen
                 awaitingPostEquals = true;
 
                 UpdateTextBox();
             }
+            catch (DivideByZeroException)
+            {
+                ShowErrorAndReset("Teilen durch 0 nicht möglich");
+            }
+            catch (EvaluateException ex)
+            {
+                // Manche Kulturen/Frameworks liefern eine spezifische Meldung
+                string msg = ex.Message ?? string.Empty;
+                if (msg.IndexOf("division by zero", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    msg.IndexOf("durch 0", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    msg.IndexOf("durch null", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    ShowErrorAndReset("Teilen durch 0 nicht möglich");
+                }
+                else
+                {
+                    ShowErrorAndReset("Bitte korrigiere deine Berechnung");
+                }
+            }
             catch
             {
-                // Optional: Fehler in currentTask anzeigen
-                currentTask = "Fehler";
-                UpdateTextBox();
-                currentTask = string.Empty;
-                lastResult = string.Empty;
-                awaitingPostEquals = false;
+                // Fehler-Popup und Aufgabe zur Korrektur stehen lassen
+                ShowErrorAndReset("Bitte korrigiere deine Berechnung");
             }
         }
 
@@ -308,7 +440,7 @@ namespace Rechner
             }
 
             // Rechenoperatoren, die als Trenner gelten
-            char[] ops = new[] { '+', '-', '*', '/', '×', '÷' };
+            char[] ops = Operators;
 
             string work = currentTask.TrimEnd();
             int opIndex = work.LastIndexOfAny(ops);
@@ -468,6 +600,122 @@ namespace Rechner
                 i = start + repl.Length;
             }
             return sb.ToString();
+        }
+
+        // random(x) zu konkreter Zahl auswerten; Bereich [min(0,x), max(0,x)]
+        private static string ExpandRandom(string expr)
+        {
+            if (string.IsNullOrEmpty(expr)) return expr;
+            int idx = 0;
+            while ((idx = expr.IndexOf("random(", idx, StringComparison.Ordinal)) >= 0)
+            {
+                int start = idx + 7; // nach 'random('
+                int depth = 1;
+                int i = start;
+                while (i < expr.Length && depth > 0)
+                {
+                    if (expr[i] == '(') depth++;
+                    else if (expr[i] == ')') depth--;
+                    i++;
+                }
+                if (depth != 0) break; // keine passende schließende Klammer
+                int end = i - 1; // position der ')'
+
+                string inner = expr.Substring(start, end - start);
+                // rekursiv weitere random im Argument auswerten
+                string innerExpanded = ExpandRandom(inner);
+
+                var dt = new System.Data.DataTable();
+                object innerValObj = dt.Compute(innerExpanded, null);
+                double x = Convert.ToDouble(innerValObj, CultureInfo.InvariantCulture);
+
+                // Integerbereich bestimmen: inklusive Grenzen
+                double lo = Math.Min(0.0, x);
+                double hi = Math.Max(0.0, x);
+                int loInt = (int)Math.Ceiling(lo);
+                int hiInt = (int)Math.Floor(hi);
+                // Falls durch Rundung leerer Bereich entsteht, gleiche Zahl erzwingen
+                if (hiInt < loInt) hiInt = loInt;
+
+                int ival = rng.Next(loInt, hiInt + 1);
+                string valStr = ival.ToString(CultureInfo.InvariantCulture);
+
+                expr = expr.Substring(0, idx) + valStr + expr.Substring(end + 1);
+                idx += valStr.Length;
+            }
+            return expr;
+        }
+
+        // Fakultät (!) in konkrete Zahl umschreiben; nur für ganzzahlige n >= 0, n <= 170
+        private static string ExpandFactorial(string expr)
+        {
+            if (string.IsNullOrEmpty(expr)) return expr;
+
+            int idx = expr.IndexOf('!');
+            while (idx >= 0)
+            {
+                // linken Operand finden
+                if (idx == 0) throw new EvaluateException("Unerwartetes '!' am Anfang");
+                int leftEnd = idx - 1;
+                int leftStart;
+                if (expr[leftEnd] == ')')
+                {
+                    // Klammerausdruck zurück
+                    int depth = 0;
+                    int i = leftEnd;
+                    while (i >= 0)
+                    {
+                        if (expr[i] == ')') depth++;
+                        else if (expr[i] == '(')
+                        {
+                            depth--;
+                            if (depth == 0) break;
+                        }
+                        i--;
+                    }
+                    if (i < 0) throw new EvaluateException("Klammerfehler bei '!'");
+                    leftStart = i;
+                }
+                else
+                {
+                    // Zahl zurück scannen (inkl. Dezimalpunkt)
+                    int i = leftEnd;
+                    while (i >= 0 && (char.IsDigit(expr[i]) || expr[i] == '.')) i--;
+                    leftStart = i + 1;
+                }
+
+                if (leftStart > leftEnd)
+                {
+                    throw new EvaluateException("Ungültige Fakultät");
+                }
+
+                string innerExpr = expr.Substring(leftStart, leftEnd - leftStart + 1);
+                // Fakultätsargument berechnen
+                var dt = new System.Data.DataTable();
+                object valObj = dt.Compute(innerExpr, null);
+                double x = Convert.ToDouble(valObj, CultureInfo.InvariantCulture);
+                double xr = Math.Round(x);
+                if (x < 0 || Math.Abs(x - xr) > 1e-9)
+                {
+                    throw new EvaluateException("Fakultät nur für n>=0 ganzzahlig");
+                }
+                int n = (int)xr;
+                if (n > 170) // 171! overflow in double
+                {
+                    throw new EvaluateException("Fakultät zu groß");
+                }
+                double fact = 1.0;
+                for (int k = 2; k <= n; k++) fact *= k;
+                string factStr = fact.ToString("R", CultureInfo.InvariantCulture);
+
+                // Ersetzen: <operand>! -> factStr
+                expr = expr.Substring(0, leftStart) + factStr + expr.Substring(idx + 1);
+
+                // weiter nach dem ersetzten Wert suchen
+                idx = expr.IndexOf('!', leftStart + factStr.Length);
+            }
+
+            return expr;
         }
 
         // Zentrale Normalisierung: mehrere Symbole für DataTable-Compute anpassen
@@ -639,7 +887,13 @@ namespace Rechner
                 textBox1.Text = currentTask;
             }
 
+            // Cursor immer ans Ende (rechts) setzen und sichtbar machen
+            textBox1.SelectionStart = textBox1.TextLength;
+            textBox1.SelectionLength = 0;
+            textBox1.Focus();
+
             richTextBox1.SuspendLayout();
+            // Zeilenenden aus Datei können \n sein, RichTextBox kommt mit beidem klar
             richTextBox1.Text = history;
             richTextBox1.SelectAll();
             richTextBox1.SelectionAlignment = HorizontalAlignment.Right;
@@ -647,9 +901,46 @@ namespace Rechner
             richTextBox1.SelectionStart = richTextBox1.TextLength;
             richTextBox1.ScrollToCaret();
             richTextBox1.ResumeLayout();
+
+
         }
 
-        private void Form1_Load(object sender, EventArgs e) { }
+        // Einheitliches Fehlermanagement für Popups und Reset
+        private void ShowErrorAndReset(string message)
+        {
+            using (var dlg = new Form2(message))
+            {
+                dlg.ShowDialog(this);
+            }
+            awaitingPostEquals = false;
+            UpdateTextBox();
+        }
+
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            try
+            {
+                if (File.Exists(historyFilePath))
+                {
+                    // Datei laden
+                    history = File.ReadAllText(historyFilePath, Encoding.UTF8);
+                }
+                else
+                {
+                    // Datei erstellen
+                    File.WriteAllText(historyFilePath, string.Empty, Encoding.UTF8);
+                    history = string.Empty;
+                }
+            }
+            catch
+            {
+                // Ignorieren: Falls nicht lesbar/schreibbar, einfach mit leerer Historie starten
+                history = string.Empty;
+            }
+
+            UpdateTextBox();
+        }
+
         private void button11_Click(object sender, EventArgs e)
         {
             // Nach einem Ergebnis: neue Eingabe mit negate(Ergebnis) beginnen
@@ -670,7 +961,7 @@ namespace Rechner
                 return;
             }
 
-            char[] ops = new[] { '+', '-', '*', '/', '×', '÷' };
+            char[] ops = Operators;
             string segment = currentTask;
             int lastOp = segment.LastIndexOfAny(ops);
             int numStart = lastOp >= 0 ? lastOp + 1 : 0;
@@ -754,6 +1045,29 @@ namespace Rechner
         private void label2_Click(object sender, EventArgs e)
         {
 
+        }
+
+        private void button8_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void richTextBox1_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void button25_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void button28_Click(object sender, EventArgs e)
+        {
+            // Historie leeren
+            history = string.Empty;
+            try { File.WriteAllText(historyFilePath, history, Encoding.UTF8); } catch { }
+            UpdateTextBox();
         }
     }
 }
