@@ -29,6 +29,8 @@ namespace Rechner
         private readonly string historyFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "historie.txt");
         // Zentrale Operatorliste
         private static readonly char[] Operators = new[] { '+', '-', '*', '/', '×', '÷' };
+        // Pfad der Fehler-Logdatei
+        private readonly string errorLogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "error.log");
 
         // Win32 für Fensterziehen ohne Rahmen
         private const int WM_NCLBUTTONDOWN = 0xA1;
@@ -88,6 +90,7 @@ namespace Rechner
             button24.Click += Button_Click; // (
             button25.Click += Button_Click; // )
             button27.Click += Button_Click; // RND
+            button29.Click += button29_Click; // Error-Log öffnen
         }
 
         private void panelTitle_MouseDown(object sender, MouseEventArgs e)
@@ -441,6 +444,7 @@ namespace Rechner
             }
             catch (DivideByZeroException)
             {
+                LogError("Teilen durch 0 nicht möglich", expression);
                 ShowErrorAndReset("Teilen durch 0 nicht möglich");
             }
             catch (EvaluateException ex)
@@ -451,15 +455,18 @@ namespace Rechner
                     msg.IndexOf("durch 0", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     msg.IndexOf("durch null", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
+                    LogError("Teilen durch 0 nicht möglich", expression);
                     ShowErrorAndReset("Teilen durch 0 nicht möglich");
                 }
                 else
                 {
+                    LogError("Bitte korrigiere deine Berechnung", expression);
                     ShowErrorAndReset("Bitte korrigiere deine Berechnung");
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                LogError("Bitte korrigiere deine Berechnung", expression);
                 // Fehler-Popup und Aufgabe zur Korrektur stehen lassen
                 ShowErrorAndReset("Bitte korrigiere deine Berechnung");
             }
@@ -1124,6 +1131,52 @@ namespace Rechner
             using (var dlg = new Form2("Herzlichen Glückwunsch, dies ist ein Easteregg."))
             {
                 dlg.ShowDialog(this);
+            }
+        }
+
+        private void LogError(string title, string expression)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                sb.Append(' ');
+                sb.Append(title);
+                sb.AppendLine();
+                sb.Append("     ");
+                sb.AppendLine(expression ?? string.Empty);
+
+                File.AppendAllText(errorLogFilePath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { /* Logging darf App nicht stoppen */ }
+        }
+
+        private void button29_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (File.Exists(errorLogFilePath))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = errorLogFilePath,
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    // Datei anlegen und dann öffnen
+                    File.WriteAllText(errorLogFilePath, string.Empty, Encoding.UTF8);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = errorLogFilePath,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            catch
+            {
+                ShowErrorAndReset("Konnte error.log nicht öffnen");
             }
         }
     }
