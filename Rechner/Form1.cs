@@ -286,20 +286,20 @@ namespace Rechner
             {
                 currentTask += t;
             }
-             // Easteregg: prüfe, ob die aktuelle reine Zahl einem Easteregg entspricht
-             // Finde den letzten Operator; danach muss eine reine Zahl stehen
-             int lastOpIdx = currentTask.LastIndexOfAny(Operators);
-             string tail = lastOpIdx >= 0 ? currentTask.Substring(lastOpIdx + 1) : currentTask;
+            // Easteregg: prüfe, ob die aktuelle reine Zahl einem Easteregg entspricht
+            // Finde den letzten Operator; danach muss eine reine Zahl stehen
+            int lastOpIdx = currentTask.LastIndexOfAny(Operators);
+            string tail = lastOpIdx >= 0 ? currentTask.Substring(lastOpIdx + 1) : currentTask;
             // Nur Zahlen/Komma akzeptieren
             if (tail.All(ch => char.IsDigit(ch) || ch == ','))
-             {
-                 // Mit InvariantCulture auf Punkt normieren
-                 string normalizedDigits = tail.Replace(',', '.');
-                 if (IsEasterEggNumberString(normalizedDigits))
-                 {
-                     ShowEasterEgg();
-                 }
-             }
+            {
+                // Mit InvariantCulture auf Punkt normieren
+                string normalizedDigits = tail.Replace(',', '.');
+                if (IsEasterEggNumberString(normalizedDigits))
+                {
+                    ShowEasterEgg();
+                }
+            }
             UpdateTextBox();
         }
 
@@ -456,7 +456,7 @@ namespace Rechner
 
                 // In die Historie übertragen: Aufgabe = Ergebnis + Zeilenumbruch für die nächste Aufgabe
                 history += expression + "=\n" + lastResult + "\n \n";
-                
+
                 // Persistieren in Datei
                 try { File.WriteAllText(historyFilePath, history, Encoding.UTF8); } catch { /* Ignorieren */ }
 
@@ -474,7 +474,7 @@ namespace Rechner
             {
                 // Manche Kulturen/Frameworks liefern eine spezifische Meldung
                 string msg = ex.Message ?? string.Empty;
-                if (msg.IndexOf("division by zero", StringComparison.OrdinalIgnoreCase) >= 0 ||7
+                if (msg.IndexOf("division by zero", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     msg.IndexOf("durch 0", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     msg.IndexOf("durch null", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
