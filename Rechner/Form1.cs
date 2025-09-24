@@ -232,6 +232,11 @@ namespace Rechner
             // Verhalten direkt nach '=': Anzeige bleibt bis zur nächsten Taste stehen
             if (awaitingPostEquals)
             {
+                // Easteregg: wenn direkt nach Ergebnis eine der Zahlen eingegeben wird, Popup
+                if (IsEasterEggInput(t))
+                {
+                    ShowEasterEgg();
+                }
                 if (IsOperator(t) || IsUnaryOp(t))
                 {
                     // Ergebnis übernehmen und mit gewähltem Operator/Unary weiterarbeiten
@@ -255,6 +260,20 @@ namespace Rechner
             // Eingabezeichen an aktuelle Aufgabe anhängen
             if (t == ".") t = ","; // Punkt-Taste als Komma interpretieren
             currentTask += t;
+            // Easteregg: prüfe, ob die aktuelle reine Zahl einem Easteregg entspricht
+            // Finde den letzten Operator; danach muss eine reine Zahl stehen
+            int lastOpIdx = currentTask.LastIndexOfAny(Operators);
+            string tail = lastOpIdx >= 0 ? currentTask.Substring(lastOpIdx + 1) : currentTask;
+            // Nur Zahlen/Komma akzeptieren
+            if (tail.All(ch => char.IsDigit(ch) || ch == ','))
+            {
+                // Mit InvariantCulture auf Punkt normieren
+                string normalizedDigits = tail.Replace(',', '.');
+                if (IsEasterEggNumberString(normalizedDigits))
+                {
+                    ShowEasterEgg();
+                }
+            }
             UpdateTextBox();
         }
 
@@ -369,6 +388,15 @@ namespace Rechner
             string expression = currentTask;
             if (string.IsNullOrWhiteSpace(expression)) return;
 
+            // Falls der Ausdruck mit einem Operator endet, entferne ihn
+            expression = expression.TrimEnd();
+            while (expression.Length > 0 && Operators.Contains(expression[expression.Length - 1]))
+            {
+                expression = expression.Substring(0, expression.Length - 1).TrimEnd();
+            }
+            // Anzeige ebenfalls korrigieren
+            currentTask = expression;
+
             string normalized = NormalizeExpression(expression);
             try
             {
@@ -393,6 +421,12 @@ namespace Rechner
                 }
 
                 lastResult = resultStr;
+
+                // Easteregg: wenn Ergebnis die Zahl ist → Popup
+                if (IsEasterEggNumberString(lastResult))
+                {
+                    ShowEasterEgg();
+                }
 
                 // In die Historie übertragen: Aufgabe = Ergebnis + Zeilenumbruch für die nächste Aufgabe
                 history += expression + "=\n" + lastResult + "\n \n";
@@ -1068,6 +1102,29 @@ namespace Rechner
             history = string.Empty;
             try { File.WriteAllText(historyFilePath, history, Encoding.UTF8); } catch { }
             UpdateTextBox();
+        }
+
+        private static bool IsEasterEggNumberString(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            double d;
+            if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out d)) return false;
+            return d == 666d || d == 12345d || d == 44866d;
+        }
+
+        private static bool IsEasterEggInput(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            var t = s.Trim();
+            return t == "666" || t == "12345" || t == "44866";
+        }
+
+        private void ShowEasterEgg()
+        {
+            using (var dlg = new Form2("Herzlichen Glückwunsch, dies ist ein Easteregg."))
+            {
+                dlg.ShowDialog(this);
+            }
         }
     }
 }
