@@ -262,21 +262,44 @@ namespace Rechner
 
             // Eingabezeichen an aktuelle Aufgabe anhängen
             if (t == ".") t = ","; // Punkt-Taste als Komma interpretieren
-            currentTask += t;
-            // Easteregg: prüfe, ob die aktuelle reine Zahl einem Easteregg entspricht
-            // Finde den letzten Operator; danach muss eine reine Zahl stehen
-            int lastOpIdx = currentTask.LastIndexOfAny(Operators);
-            string tail = lastOpIdx >= 0 ? currentTask.Substring(lastOpIdx + 1) : currentTask;
-            // Nur Zahlen/Komma akzeptieren
-            if (tail.All(ch => char.IsDigit(ch) || ch == ','))
+            if (t == "(")
             {
-                // Mit InvariantCulture auf Punkt normieren
-                string normalizedDigits = tail.Replace(',', '.');
-                if (IsEasterEggNumberString(normalizedDigits))
+                if (!string.IsNullOrEmpty(currentTask))
                 {
-                    ShowEasterEgg();
+                    char last = currentTask[currentTask.Length - 1];
+                    if (char.IsDigit(last) || last == ')' || last == '!' || last == '%')
+                    {
+                        // Implizite Multiplikation: Zahl vor Klammer → * einfügen
+                        currentTask += "*(";
+                    }
+                    else
+                    {
+                        currentTask += "(";
+                    }
+                }
+                else
+                {
+                    currentTask += "(";
                 }
             }
+            else
+            {
+                currentTask += t;
+            }
+             // Easteregg: prüfe, ob die aktuelle reine Zahl einem Easteregg entspricht
+             // Finde den letzten Operator; danach muss eine reine Zahl stehen
+             int lastOpIdx = currentTask.LastIndexOfAny(Operators);
+             string tail = lastOpIdx >= 0 ? currentTask.Substring(lastOpIdx + 1) : currentTask;
+            // Nur Zahlen/Komma akzeptieren
+            if (tail.All(ch => char.IsDigit(ch) || ch == ','))
+             {
+                 // Mit InvariantCulture auf Punkt normieren
+                 string normalizedDigits = tail.Replace(',', '.');
+                 if (IsEasterEggNumberString(normalizedDigits))
+                 {
+                     ShowEasterEgg();
+                 }
+             }
             UpdateTextBox();
         }
 
@@ -773,6 +796,23 @@ namespace Rechner
             expression = expression.Replace("÷", "/");         // Division
             expression = expression.Replace("−", "-");         // Unicode-Minus
             expression = expression.Replace(",", ".");         // Dezimal-Komma → Punkt
+
+            // Implizite Multiplikation vor Klammer z. B. 2(3+4) → 2*(3+4)
+            var sb = new StringBuilder();
+            for (int i = 0; i < expression.Length; i++)
+            {
+                char c = expression[i];
+                if (c == '(' && i > 0)
+                {
+                    char p = expression[i - 1];
+                    if (char.IsDigit(p) || p == ')' || p == '!' || p == '%')
+                    {
+                        sb.Append('*');
+                    }
+                }
+                sb.Append(c);
+            }
+            expression = sb.ToString();
 
             // Prozent kontextabhängig expandieren (muss vor negate erfolgen)
             expression = ExpandPercent(expression);
