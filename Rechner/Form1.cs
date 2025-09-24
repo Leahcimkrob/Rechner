@@ -474,7 +474,7 @@ namespace Rechner
             {
                 // Manche Kulturen/Frameworks liefern eine spezifische Meldung
                 string msg = ex.Message ?? string.Empty;
-                if (msg.IndexOf("division by zero", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                if (msg.IndexOf("division by zero", StringComparison.OrdinalIgnoreCase) >= 0 ||7
                     msg.IndexOf("durch 0", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     msg.IndexOf("durch null", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
