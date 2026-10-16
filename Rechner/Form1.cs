@@ -1,15 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
 using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Forms;
 using System.Globalization;
-using System.Runtime.InteropServices;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Windows.Forms;
 
 namespace Rechner
 {
@@ -396,7 +391,7 @@ namespace Rechner
 
                 // In die Historie übertragen: Aufgabe = Ergebnis + Zeilenumbruch für die nächste Aufgabe
                 history += expression + "=\n" + lastResult + "\n \n";
-                
+
                 // Persistieren in Datei
                 try { File.WriteAllText(historyFilePath, history, Encoding.UTF8); } catch { /* Ignorieren */ }
 
