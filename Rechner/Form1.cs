@@ -24,6 +24,8 @@ namespace Rechner
         private readonly string historyFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "historie.txt");
         // Zentrale Operatorliste
         private static readonly char[] Operators = new[] { '+', '-', '*', '/', '×', '÷' };
+        // Pfad der Fehler-Logdatei
+        private readonly string errorLogFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "error.log");
 
         // Win32 für Fensterziehen ohne Rahmen
         private const int WM_NCLBUTTONDOWN = 0xA1;
@@ -83,6 +85,7 @@ namespace Rechner
             button24.Click += Button_Click; // (
             button25.Click += Button_Click; // )
             button27.Click += Button_Click; // RND
+            button29.Click += button29_Click; // Error-Log öffnen
         }
 
         private void panelTitle_MouseDown(object sender, MouseEventArgs e)
@@ -227,6 +230,11 @@ namespace Rechner
             // Verhalten direkt nach '=': Anzeige bleibt bis zur nächsten Taste stehen
             if (awaitingPostEquals)
             {
+                // Easteregg: wenn direkt nach Ergebnis eine der Zahlen eingegeben wird, Popup
+                if (IsEasterEggInput(t))
+                {
+                    ShowEasterEgg();
+                }
                 if (IsOperator(t) || IsUnaryOp(t))
                 {
                     // Ergebnis übernehmen und mit gewähltem Operator/Unary weiterarbeiten
@@ -249,7 +257,44 @@ namespace Rechner
 
             // Eingabezeichen an aktuelle Aufgabe anhängen
             if (t == ".") t = ","; // Punkt-Taste als Komma interpretieren
-            currentTask += t;
+            if (t == "(")
+            {
+                if (!string.IsNullOrEmpty(currentTask))
+                {
+                    char last = currentTask[currentTask.Length - 1];
+                    if (char.IsDigit(last) || last == ')' || last == '!' || last == '%')
+                    {
+                        // Implizite Multiplikation: Zahl vor Klammer → * einfügen
+                        currentTask += "*(";
+                    }
+                    else
+                    {
+                        currentTask += "(";
+                    }
+                }
+                else
+                {
+                    currentTask += "(";
+                }
+            }
+            else
+            {
+                currentTask += t;
+            }
+            // Easteregg: prüfe, ob die aktuelle reine Zahl einem Easteregg entspricht
+            // Finde den letzten Operator; danach muss eine reine Zahl stehen
+            int lastOpIdx = currentTask.LastIndexOfAny(Operators);
+            string tail = lastOpIdx >= 0 ? currentTask.Substring(lastOpIdx + 1) : currentTask;
+            // Nur Zahlen/Komma akzeptieren
+            if (tail.All(ch => char.IsDigit(ch) || ch == ','))
+            {
+                // Mit InvariantCulture auf Punkt normieren
+                string normalizedDigits = tail.Replace(',', '.');
+                if (IsEasterEggNumberString(normalizedDigits))
+                {
+                    ShowEasterEgg();
+                }
+            }
             UpdateTextBox();
         }
 
@@ -364,6 +409,15 @@ namespace Rechner
             string expression = currentTask;
             if (string.IsNullOrWhiteSpace(expression)) return;
 
+            // Falls der Ausdruck mit einem Operator endet, entferne ihn
+            expression = expression.TrimEnd();
+            while (expression.Length > 0 && Operators.Contains(expression[expression.Length - 1]))
+            {
+                expression = expression.Substring(0, expression.Length - 1).TrimEnd();
+            }
+            // Anzeige ebenfalls korrigieren
+            currentTask = expression;
+
             string normalized = NormalizeExpression(expression);
             try
             {
@@ -389,6 +443,12 @@ namespace Rechner
 
                 lastResult = resultStr;
 
+                // Easteregg: wenn Ergebnis die Zahl ist → Popup
+                if (IsEasterEggNumberString(lastResult))
+                {
+                    ShowEasterEgg();
+                }
+
                 // In die Historie übertragen: Aufgabe = Ergebnis + Zeilenumbruch für die nächste Aufgabe
                 history += expression + "=\n" + lastResult + "\n \n";
 
@@ -402,6 +462,7 @@ namespace Rechner
             }
             catch (DivideByZeroException)
             {
+                LogError("Teilen durch 0 nicht möglich", expression);
                 ShowErrorAndReset("Teilen durch 0 nicht möglich");
             }
             catch (EvaluateException ex)
@@ -412,15 +473,18 @@ namespace Rechner
                     msg.IndexOf("durch 0", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     msg.IndexOf("durch null", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
+                    LogError("Teilen durch 0 nicht möglich", expression);
                     ShowErrorAndReset("Teilen durch 0 nicht möglich");
                 }
                 else
                 {
+                    LogError("Bitte korrigiere deine Berechnung", expression);
                     ShowErrorAndReset("Bitte korrigiere deine Berechnung");
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                LogError("Bitte korrigiere deine Berechnung", expression);
                 // Fehler-Popup und Aufgabe zur Korrektur stehen lassen
                 ShowErrorAndReset("Bitte korrigiere deine Berechnung");
             }
@@ -727,6 +791,23 @@ namespace Rechner
             expression = expression.Replace("÷", "/");         // Division
             expression = expression.Replace("−", "-");         // Unicode-Minus
             expression = expression.Replace(",", ".");         // Dezimal-Komma → Punkt
+
+            // Implizite Multiplikation vor Klammer z. B. 2(3+4) → 2*(3+4)
+            var sb = new StringBuilder();
+            for (int i = 0; i < expression.Length; i++)
+            {
+                char c = expression[i];
+                if (c == '(' && i > 0)
+                {
+                    char p = expression[i - 1];
+                    if (char.IsDigit(p) || p == ')' || p == '!' || p == '%')
+                    {
+                        sb.Append('*');
+                    }
+                }
+                sb.Append(c);
+            }
+            expression = sb.ToString();
 
             // Prozent kontextabhängig expandieren (muss vor negate erfolgen)
             expression = ExpandPercent(expression);
@@ -1063,6 +1144,75 @@ namespace Rechner
             history = string.Empty;
             try { File.WriteAllText(historyFilePath, history, Encoding.UTF8); } catch { }
             UpdateTextBox();
+        }
+
+        private static bool IsEasterEggNumberString(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            double d;
+            if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out d)) return false;
+            return d == 666d || d == 12345d || d == 44866d;
+        }
+
+        private static bool IsEasterEggInput(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            var t = s.Trim();
+            return t == "666" || t == "12345" || t == "44866";
+        }
+
+        private void ShowEasterEgg()
+        {
+            using (var dlg = new Form2("Herzlichen Glückwunsch, dies ist ein Easteregg."))
+            {
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void LogError(string title, string expression)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                sb.Append(' ');
+                sb.Append(title);
+                sb.AppendLine();
+                sb.Append("     ");
+                sb.AppendLine(expression ?? string.Empty);
+
+                File.AppendAllText(errorLogFilePath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { /* Logging darf App nicht stoppen */ }
+        }
+
+        private void button29_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (File.Exists(errorLogFilePath))
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = errorLogFilePath,
+                        UseShellExecute = true
+                    });
+                }
+                else
+                {
+                    // Datei anlegen und dann öffnen
+                    File.WriteAllText(errorLogFilePath, string.Empty, Encoding.UTF8);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = errorLogFilePath,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            catch
+            {
+                ShowErrorAndReset("Konnte error.log nicht öffnen");
+            }
         }
     }
 }

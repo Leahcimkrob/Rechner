@@ -38,6 +38,7 @@ namespace Rechner
             // label1
             // 
             this.label1.AllowDrop = true;
+            this.label1.Anchor = System.Windows.Forms.AnchorStyles.None;
             this.label1.Font = new System.Drawing.Font("Microsoft Sans Serif", 22F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.label1.ForeColor = System.Drawing.Color.Cyan;
             this.label1.ImageAlign = System.Drawing.ContentAlignment.TopCenter;
@@ -52,6 +53,7 @@ namespace Rechner
             // 
             // button1
             // 
+            this.button1.Anchor = System.Windows.Forms.AnchorStyles.None;
             this.button1.DialogResult = System.Windows.Forms.DialogResult.OK;
             this.button1.ForeColor = System.Drawing.Color.Black;
             this.button1.Location = new System.Drawing.Point(200, 125);
@@ -74,6 +76,8 @@ namespace Rechner
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
             this.Text = "Fehler";
             this.Load += new System.EventHandler(this.Form2_Load);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
             this.ResumeLayout(false);
 
         }
